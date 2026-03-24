@@ -4,20 +4,15 @@
 
 # agent-logger
 
-**Structured JSON logging with tracing for LLM agents. Zero external dependencies.**
+**Structured JSON logging for LLM agents — correlation IDs, context binding, sampling, and redaction.**
 
-[![PyPI](https://img.shields.io/pypi/v/agent-logger?color=blue)](https://pypi.org/project/agent-logger/)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Zero deps](https://img.shields.io/badge/dependencies-zero-brightgreen)](pyproject.toml)
+[![PyPI version](https://img.shields.io/pypi/v/agent-logger?color=blue&style=flat-square)](https://pypi.org/project/agent-logger/) [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square)](https://python.org) [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE) [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](#)
 
 ---
 
 ## The Problem
 
-Production LLM agents fail silently. Without structured json logging with tracing, you get undefined behaviour at scale — race conditions, lost state, cascading failures, and no way to debug what went wrong.
-
-`agent-logger` gives you a production-ready structured json logging with tracing primitive with a clean API, tested edge cases, and zero configuration.
+Without a structured logger, context propagation requires manual threading through every function call. Correlation IDs get lost; log lines from different agents interleave with no way to reconstruct a single request's journey.
 
 ## Installation
 
@@ -25,88 +20,103 @@ Production LLM agents fail silently. Without structured json logging with tracin
 pip install agent-logger
 ```
 
-Or from source:
-
-```bash
-git clone https://github.com/darshjme/agent-logger.git
-cd agent-logger
-pip install -e .
-```
-
 ## Quick Start
 
 ```python
-from agent_logger import *  # see API reference below
+from agent_logger import ContextLogger, CorrelationContext, _JSONFormatter
 
-# See examples/ directory for complete working examples
+# Initialise
+instance = ContextLogger(name="my_agent")
+
+# Use
+# see API reference below
+print(result)
 ```
 
 ## API Reference
 
-The main classes and functions are defined in `agent_logger/__init__.py`.
+### `ContextLogger`
 
-Key exports: `Correlation IDs · request tracing · auto-redaction · log sampling`
+```python
+class ContextLogger:
+    """Logger that merges a fixed set of fields into every log line.
+    def __init__(self, parent: "AgentLogger", **fields: Any) -> None:
+    def bind(self, **kwargs: Any) -> "ContextLogger":
+        """Return a new ContextLogger with additional bound fields."""
+    def _emit(self, level: str, message: str, **kwargs: Any) -> None:
+    def debug(self, message: str, **kwargs: Any) -> None:
+```
 
-All classes follow a consistent interface:
-- Instantiate with sensible defaults
-- Compose with other arsenal libraries
-- Zero external dependencies required
+### `CorrelationContext`
 
-See the source code and `tests/` directory for verified usage examples.
+```python
+class CorrelationContext:
+    """Thread-local correlation ID manager.
+    def set(cls, id: str) -> None:
+        """Set correlation ID for the current thread."""
+    def get(cls) -> Optional[str]:
+        """Get correlation ID for the current thread. Returns None if not set."""
+    def generate(cls) -> str:
+        """Generate a new UUID4 correlation ID (does NOT set it)."""
+    def clear(cls) -> None:
+        """Clear the correlation ID for the current thread."""
+```
+
+### `_JSONFormatter`
+
+```python
+class _JSONFormatter(logging.Formatter):
+    """Formats a LogRecord as a JSON string."""
+    def format(self, record: logging.LogRecord) -> str:
+```
+
+### `AgentLogger`
+
+```python
+class AgentLogger:
+    """Structured JSON logger for LLM agents.
+    def __init__(
+```
+
 
 ## How It Works
 
+### Flow
+
 ```mermaid
 flowchart LR
-    A[Agent Task] --> B[agent-logger]
-    B --> C{Decision}
-    C -->|success| D[✅ Result]
-    C -->|failure| E[⚠️ Handle]
-    E --> B
-
-    style B fill:#161b22,stroke:#cc9933,stroke-width:2,color:#cc9933
-    style D fill:#1a3320,stroke:#238636,color:#3fb950
-    style E fill:#3d1a1a,stroke:#f85149,color:#f85149
+    A[User Code] -->|create| B[ContextLogger]
+    B -->|configure| C[CorrelationContext]
+    C -->|execute| D{Success?}
+    D -->|yes| E[Return Result]
+    D -->|no| F[Error Handler]
+    F --> G[Fallback / Retry]
+    G --> C
 ```
+
+### Sequence
 
 ```mermaid
 sequenceDiagram
-    participant Agent
-    participant AgentLogger as agent-logger
-    participant Output
+    participant App
+    participant ContextLogger
+    participant CorrelationContext
 
-    Agent->>AgentLogger: initialize()
-    AgentLogger-->>Agent: ready
-
-    loop Agent Run
-        Agent->>AgentLogger: process(input)
-        AgentLogger-->>Agent: result
-    end
-
-    Agent->>Output: deliver(result)
+    App->>+ContextLogger: initialise()
+    ContextLogger->>+CorrelationContext: configure()
+    CorrelationContext-->>-ContextLogger: ready
+    App->>+ContextLogger: run(context)
+    ContextLogger->>+CorrelationContext: execute(context)
+    CorrelationContext-->>-ContextLogger: result
+    ContextLogger-->>-App: WorkflowResult
 ```
 
 ## Philosophy
 
-*Likhitam cha* — what is written, endures. agent-logger writes every agent action with precision.
+> Chitragupta records every deed in Yama's court; a structured logger is the production equivalent of that perfect witness.
 
 ---
 
-## Part of the Arsenal
-
-`agent-logger` is one of six production libraries for LLM agents:
-
-| Library | Purpose |
-|---------|---------|
-| [herald](https://github.com/darshjme/herald) | Semantic task routing |
-| [engram](https://github.com/darshjme/engram) | Agent memory |
-| [sentinel](https://github.com/darshjme/sentinel) | ReAct loop guards |
-| [verdict](https://github.com/darshjme/verdict) | Agent evaluation |
-| [agent-guardrails](https://github.com/darshjme/agent-guardrails) | Output validation |
-| [agent-observability](https://github.com/darshjme/agent-observability) | Tracing & metrics |
-
-→ [arsenal](https://github.com/darshjme/arsenal) — the complete stack
-
----
+*Part of the [arsenal](https://github.com/darshjme/arsenal) — production stack for LLM agents.*
 
 *Built by [Darshankumar Joshi](https://github.com/darshjme), Gujarat, India.*
